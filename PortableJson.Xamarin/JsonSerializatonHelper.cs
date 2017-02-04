@@ -25,48 +25,12 @@ namespace PortableJson.Xamarin
         /// <returns></returns>
         private static bool IsInheritedBy(Type targetType, Type baseType)
         {
-            //if targetType is a generic type (for instance, List<T>), then extract List<> without the generic parameter and use it for comparison.
-            if (targetType.IsConstructedGenericType)
-            {
-                targetType = targetType.GetGenericTypeDefinition();
-            }
-
-            //if baseType is a generic type (for instance, List<T>), then extract List<> without the generic parameter and use it for comparison.
-            if (baseType.IsConstructedGenericType)
-            {
-                baseType = baseType.GetGenericTypeDefinition();
-            }
-
-            //do we have a match?
-            if (targetType == baseType)
-            {
-                return true;
-            }
-            else
-            {
-                var typeToAnalyzeInformation = targetType.GetTypeInfo();
-                if (typeToAnalyzeInformation.BaseType == null)
-                {
-                    return false;
-                }
-                else
-                {
-                    //check targetType's base type, and see if that's equal to baseType instead.
-                    return IsInheritedBy(typeToAnalyzeInformation.BaseType, baseType);
-                }
-            }
+            return baseType.IsAssignableFrom(targetType);
         }
 
         private static bool IsArrayType(Type type)
         {
-            return type.IsArray
-                    || IsInheritedBy(type, typeof(IEnumerable<>))
-                    || IsInheritedBy(type, typeof(IList<>))
-                    || IsInheritedBy(type, typeof(ICollection<>))
-                    || IsInheritedBy(type, typeof(IReadOnlyCollection<>))
-                    || IsInheritedBy(type, typeof(List<>))
-                    || IsInheritedBy(type, typeof(HashSet<>))
-                    || IsInheritedBy(type, typeof(ReadOnlyCollection<>));
+            return type.IsArray || IsInheritedBy(type, typeof(IEnumerable));
         }
 
         public static string Serialize<T>(T element)
@@ -84,6 +48,10 @@ namespace PortableJson.Xamarin
 
                 result += "\"";
             }
+            else if (element is Enum)
+            {
+                result += Convert.ChangeType(element, (element as Enum).GetTypeCode()).ToString();
+            }
             else if (element is int || element is long || element is short)
             {
                 result += element.ToString();
@@ -93,12 +61,18 @@ namespace PortableJson.Xamarin
                 result += element
                     .ToString()
                     .Replace(",", ".");
-            } else if(element is bool)
+            }
+            else if (element is bool)
             {
                 result = (bool)(object)element ? "true" : "false";
-            } else if(element is Guid)
+            }
+            else if (element is Guid)
             {
                 result = "\"" + element + "\"";
+            }
+            else if (element is TimeSpan)
+            {
+                result = "\"" + element.ToString() + "\"";
             }
             else if (element == null)
             {
@@ -108,7 +82,7 @@ namespace PortableJson.Xamarin
             {
                 var type = element.GetType();
 
-                var isArray = IsArrayType(type);
+                var isArray = element is IEnumerable;
                 if (isArray)
                 {
                     result += "[";
@@ -138,7 +112,7 @@ namespace PortableJson.Xamarin
                 {
                     var properties = type
                         .GetRuntimeProperties()
-                        .Where(p => p.CanRead);
+                        .Where(p => p.CanRead && p.CanWrite);
                     foreach (var property in properties)
                     {
                         result += "\"" + property.Name + "\":";
@@ -151,6 +125,7 @@ namespace PortableJson.Xamarin
                     {
                         result = result.Substring(0, result.Length - 1);
                     }
+
                 }
 
                 if (isArray)
@@ -175,13 +150,16 @@ namespace PortableJson.Xamarin
         {
             if (input == null || input == "null")
             {
-                return "null";
+                return null;
             }
 
             //remove all whitespaces from the JSON string.
             input = SanitizeJson(input);
 
-            if (type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(double) || type == typeof(float) || type == typeof(decimal) || type == typeof(string) || type == typeof(bool) || type == typeof(Guid))
+            if (type == typeof(int) || type == typeof(long) || type == typeof(short) || 
+                type == typeof(double) || type == typeof(float) || type == typeof(decimal) || 
+                type == typeof(string) || type == typeof(bool) || type == typeof(Guid) || 
+                type == typeof(TimeSpan) || type.IsEnum)
             {
                 //simple deserialization.
                 return DeserializeSimple(input, type);
@@ -367,9 +345,21 @@ namespace PortableJson.Xamarin
                 throw new InvalidOperationException("JSON arrays must begin with a '[' and end with a ']'.");
             }
 
+            Type innerType;
+
             //get the type of elements in this array.
-            var innerType = type.GenericTypeArguments[0];
-            var listType = typeof(List<>).MakeGenericType(innerType);
+            if (type.GenericTypeArguments.Length == 0)
+            {
+                // Something like Foo : List<>
+                innerType = type.BaseType.GenericTypeArguments[0];
+            }
+            else
+            {
+                // Something like List<>
+                innerType = type.GenericTypeArguments[0];
+            }
+            //var listType = typeof(List<>).MakeGenericType(innerType);
+            var listType = type;
             var list = Activator.CreateInstance(listType);
             var addMethodName = nameof(List<object>.Add);
             var listAddMethod = listType.GetRuntimeMethod(addMethodName, new[] { innerType });
@@ -490,6 +480,10 @@ namespace PortableJson.Xamarin
                     return result;
                 }
             }
+            else if (type.IsEnum)
+            {
+                return Enum.ToObject(type, int.Parse(data));
+            }
             else if (type == typeof(int))
             {
                 return int.Parse(data, NumberStyles.Any, serializationCulture);
@@ -513,10 +507,16 @@ namespace PortableJson.Xamarin
             else if (type == typeof(double))
             {
                 return double.Parse(data, NumberStyles.Any, serializationCulture);
-            } else if(type == typeof(bool))
+            }
+            else if (type == typeof(bool))
             {
                 return string.Equals("true", data, StringComparison.OrdinalIgnoreCase) ? true : false;
-            } else if(type == typeof(Guid))
+            }
+            else if (type == typeof(TimeSpan))
+            {
+                return TimeSpan.Parse(data.Replace("\"", ""));
+            }
+            else if(type == typeof(Guid))
             {
                 if (data.Length < 2 || (!data.EndsWith("\"") && !data.StartsWith("\"")))
                 {

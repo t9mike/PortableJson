@@ -1,0 +1,27 @@
+﻿<Properties>
+  <MonoDevelop.Ide.Workbench ActiveDocument="PortableJson.Xamarin/JsonSerializatonHelper.cs">
+    <Files>
+      <File FileName="PortableJson.Xamarin/JsonSerializatonHelper.cs" Line="15" Column="25" />
+    </Files>
+    <Pads>
+      <Pad Id="ProjectPad">
+        <State name="__root__">
+          <Option id="ShowAllFiles" value="True" />
+          <Node name="PortableJson" expanded="True">
+            <Node name="PortableJson.Xamarin" expanded="True">
+              <Node name="Packages" expanded="True" />
+              <Node name="Properties" expanded="True" />
+              <Node name="JsonSerializatonHelper.cs" selected="True" />
+            </Node>
+          </Node>
+        </State>
+      </Pad>
+    </Pads>
+  </MonoDevelop.Ide.Workbench>
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
+  <MonoDevelop.Ide.DebuggingService.Breakpoints>
+    <BreakpointStore />
+  </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
+  <MultiItemStartupConfigurations />
+</Properties>
