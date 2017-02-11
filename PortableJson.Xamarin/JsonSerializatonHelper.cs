@@ -11,6 +11,12 @@ namespace PortableJson.Xamarin
     public static class JsonSerializationHelper
     {
         private static readonly CultureInfo serializationCulture;
+        private static readonly Type[] supportedValueTypes = new[]
+        {
+            typeof(int), typeof(long), typeof(short), typeof(double), 
+            typeof(float), typeof(decimal), typeof(bool), typeof(Guid),
+            typeof(TimeSpan), typeof(DateTime)
+        };
 
         static JsonSerializationHelper()
         {
@@ -37,7 +43,13 @@ namespace PortableJson.Xamarin
         {
             var result = string.Empty;
 
-            if (element is string)
+            if (element != null && element.GetType().ToString().Contains("KeyValuePair`2"))
+            {
+                var kv = JsonUtil.KVCastFrom(element);
+                result += "{" + Serialize(kv.Key) + ", " + Serialize(kv.Value) + "}";
+            }
+
+            else if (element is string)
             {
                 result += "\"";
 
@@ -73,6 +85,13 @@ namespace PortableJson.Xamarin
             else if (element is TimeSpan)
             {
                 result = "\"" + element.ToString() + "\"";
+            }
+            else if (element is DateTime)
+            {
+                var dateTime = (DateTime)(object)element;
+                DateTime utcDateTime = dateTime.ToUniversalTime();
+                long ticks = JsonUtil.ConvertDateTimeToJavaScriptTicks(utcDateTime);
+                result = ticks.ToString(CultureInfo.InvariantCulture);
             }
             else if (element == null)
             {
@@ -156,13 +175,26 @@ namespace PortableJson.Xamarin
             //remove all whitespaces from the JSON string.
             input = SanitizeJson(input);
 
-            if (type == typeof(int) || type == typeof(long) || type == typeof(short) || 
-                type == typeof(double) || type == typeof(float) || type == typeof(decimal) || 
-                type == typeof(string) || type == typeof(bool) || type == typeof(Guid) || 
-                type == typeof(TimeSpan) || type.IsEnum)
+            var nullablesRealType = Nullable.GetUnderlyingType(type);
+
+            if (nullablesRealType != null && supportedValueTypes.Contains(nullablesRealType))
+            {
+                return DeserializeNullableSimple(input, nullablesRealType);
+            }
+
+            else if (nullablesRealType != null)
+            {
+                throw new NotSupportedException("unsupported nullable type found " + nullablesRealType);
+            }
+
+            else if (supportedValueTypes.Contains(type) || type == typeof(string) || type.IsEnum)
             {
                 //simple deserialization.
                 return DeserializeSimple(input, type);
+            }
+            else if (typeof(IDictionary).IsAssignableFrom(type))
+            {
+                return DeserializeDictionary(input, type);
             }
             else if (IsArrayType(type))
             {
@@ -340,9 +372,14 @@ namespace PortableJson.Xamarin
         /// <returns></returns>
         private static object DeserializeArray(string data, Type type)
         {
-            if (data.Length < 2 || !(data.StartsWith("[") && data.EndsWith("]")))
+            return DeserializeArray(data, type, "JSON arrays", "[", "]");
+        }
+
+        private static object DeserializeArray(string data, Type type, string what, string start_char, string end_char)
+        {
+            if (data.Length < 2 || !(data.StartsWith(start_char) && data.EndsWith(end_char)))
             {
-                throw new InvalidOperationException("JSON arrays must begin with a '[' and end with a ']'.");
+                throw new InvalidOperationException(what + " must begin with a '[' and end with a ']'.");
             }
 
             Type innerType;
@@ -442,6 +479,230 @@ namespace PortableJson.Xamarin
             return list;
         }
 
+        private static object DeserializeDictionary(string data, Type type)
+        {
+            if (data.Length < 2 || !(data.StartsWith("[") && data.EndsWith("]")))
+            {
+                throw new InvalidOperationException("JSON arrays must begin with a '[' and end with a ']'.");
+            }
+
+            Type keyType;
+            Type valueType;
+
+            //get the type of elements in this array.
+            if (type.GenericTypeArguments.Length == 0)
+            {
+                // Something like Foo : Dictionary<,>
+                keyType = type.BaseType.GenericTypeArguments[0];
+                valueType = type.BaseType.GenericTypeArguments[1];
+            }
+            else
+            {
+                // Something like List<>
+                keyType = type.GenericTypeArguments[0];
+                valueType = type.GenericTypeArguments[1];
+            }
+            var dictType = type;
+            var dict = Activator.CreateInstance(dictType);
+            var addMethodName = nameof(Dictionary<object,object>.Add);
+            var dictAddMethod = dictType.GetRuntimeMethod(addMethodName, new[] { keyType, valueType });
+
+            //get the inner data.
+            data = data.Substring(0, data.Length - 1).Substring(1);
+
+            //maintain the state.
+            var inString = false;
+            var inEscapeSequence = false;
+            var nestingLevel = 0;
+
+            var temporaryData = string.Empty;
+            for (var i = 0; i < data.Length; i++)
+            {
+                //are we done with the whole sequence, or are we at the next element?
+                var isLastCharacter = i == data.Length - 1;
+
+                var character = data[i];
+                if (inString && !isLastCharacter)
+                {
+                    if (inEscapeSequence)
+                    {
+                        inEscapeSequence = false;
+                    }
+                    else
+                    {
+                        if (character == '\"')
+                        {
+                            temporaryData += character;
+                            inString = false;
+                        }
+                        else if (character == '\\')
+                        {
+                            inEscapeSequence = true;
+                        }
+                        else
+                        {
+                            temporaryData += character;
+                        }
+                    }
+                }
+                else
+                {
+                    if (character == '\"' && !isLastCharacter)
+                    {
+                        inString = true;
+                        temporaryData += character;
+                    }
+                    else
+                    {
+
+                        //keep track of nesting levels.
+                        if (character == '[' || character == '{') nestingLevel++;
+                        if (character == ']' || character == '}') nestingLevel--;
+
+                        if (nestingLevel == 0 && (character == ',' || isLastCharacter))
+                        {
+                            //do we need to finalize the temporary data?
+                            if (isLastCharacter)
+                            {
+                                temporaryData += character;
+                            }
+
+                            if (!string.IsNullOrEmpty(temporaryData))
+                            {
+                                // We get something like {"key", "value"} here
+                                // Use array de-serializer to get key and value
+                                //var kv = (DeserializeArray(temporaryData, typeof(List<object>), "key, value pairs", "{", "}");
+
+                                var kv = DeserializeKeyValue(temporaryData, keyType, valueType);
+                                dictAddMethod.Invoke(dict, new[] { kv.Key, kv.Value });
+
+                                //reset the temporary data.
+                                temporaryData = string.Empty;
+                            }
+                        }
+                        else
+                        {
+                            temporaryData += character;
+                        }
+                    }
+                }
+            }
+
+            return dict;
+        }
+        
+        // Something like {0, "hello world"} where 0 is serialized key and "hello world" is serialized value
+        private static KeyValuePair<object,object> DeserializeKeyValue(string data, Type keyType, Type valueType)
+        {
+            if (data.Length < 2 || !(data.StartsWith("{") && data.EndsWith("}")))
+            {
+                throw new InvalidOperationException("key value pairs must begin with a '{' and end with a '}'.");
+            }
+
+            object key = null, value = null;
+
+            //get the inner data.
+            data = data.Substring(0, data.Length - 1).Substring(1);
+
+            //maintain the state.
+            var inString = false;
+            var inEscapeSequence = false;
+            var nestingLevel = 0;
+            int numElementsFound = 0;
+
+            var temporaryData = string.Empty;
+            for (var i = 0; i < data.Length; i++)
+            {
+                //are we done with the whole sequence, or are we at the next element?
+                var isLastCharacter = i == data.Length - 1;
+
+                var character = data[i];
+                if (inString && !isLastCharacter)
+                {
+                    if (inEscapeSequence)
+                    {
+                        inEscapeSequence = false;
+                    }
+                    else
+                    {
+                        if (character == '\"')
+                        {
+                            temporaryData += character;
+                            inString = false;
+                        }
+                        else if (character == '\\')
+                        {
+                            inEscapeSequence = true;
+                        }
+                        else
+                        {
+                            temporaryData += character;
+                        }
+                    }
+                }
+                else
+                {
+                    if (character == '\"' && !isLastCharacter)
+                    {
+                        inString = true;
+                        temporaryData += character;
+                    } else { 
+
+                        //keep track of nesting levels.
+                        if (character == '[' || character == '{') nestingLevel++;
+                        if (character == ']' || character == '}') nestingLevel--;
+
+                        if (nestingLevel == 0 && (character == ',' || isLastCharacter))
+                        {
+                            //do we need to finalize the temporary data?
+                            if (isLastCharacter)
+                            {
+                                temporaryData += character;
+                            }
+
+                            if (!string.IsNullOrEmpty(temporaryData))
+                            {
+                                if (numElementsFound == 0)
+                                {
+                                    key = Deserialize(temporaryData, keyType);
+                                }
+                                else if (numElementsFound == 1)
+                                {
+                                    value = Deserialize(temporaryData, valueType);
+                                }
+                                else
+                                {
+                                    throw new Exception("only 2 elements should be in a dictionary key-value pair");
+                                }
+                                ++numElementsFound;
+
+                                //reset the temporary data.
+                                temporaryData = string.Empty;
+                            }
+                        }
+                        else
+                        {
+                            temporaryData += character;
+                        }
+                    }
+                }
+            }
+
+            return new KeyValuePair<object, object>(key, value);
+        }
+
+        private static object DeserializeNullableSimple(string data, Type underlyingType)
+        {
+            if (data == "null")
+            {
+                return null;
+            }
+            else
+            {
+                return DeserializeSimple(data, underlyingType);
+            }
+        }
+
         private static object DeserializeSimple(string data, Type type)
         {
             if (type == typeof(string))
@@ -515,6 +776,10 @@ namespace PortableJson.Xamarin
             else if (type == typeof(TimeSpan))
             {
                 return TimeSpan.Parse(data.Replace("\"", ""));
+            }
+            else if (type == typeof(DateTime))
+            {
+                return JsonUtil.ConvertJavaScriptTicksToDateTime(long.Parse(data)).ToLocalTime();
             }
             else if(type == typeof(Guid))
             {
