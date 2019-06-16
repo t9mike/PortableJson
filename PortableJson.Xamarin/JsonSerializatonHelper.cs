@@ -93,6 +93,10 @@ namespace PortableJson.Xamarin
                 long ticks = JsonUtil.ConvertDateTimeToJavaScriptTicks(utcDateTime);
                 result = ticks.ToString(CultureInfo.InvariantCulture);
             }
+            else if (element is Version)
+            {
+                result = "\"" + element.ToString() + "\"";
+            }
             else if (element == null)
             {
                 result += "null";
@@ -191,6 +195,10 @@ namespace PortableJson.Xamarin
             {
                 //simple deserialization.
                 return DeserializeSimple(input, type);
+            }
+            else if (typeof(Version) == type)
+            {
+                return new Version(input.Replace("\"", ""));
             }
             else if (typeof(IDictionary).IsAssignableFrom(type))
             {
