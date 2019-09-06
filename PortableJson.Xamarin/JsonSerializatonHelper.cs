@@ -13,6 +13,7 @@ namespace PortableJson.Xamarin
         private static readonly CultureInfo serializationCulture;
         private static readonly Type[] supportedValueTypes = new[]
         {
+            typeof(uint), typeof(ulong),
             typeof(int), typeof(long), typeof(short), typeof(double), 
             typeof(float), typeof(decimal), typeof(bool), typeof(Guid),
             typeof(TimeSpan), typeof(DateTime)
@@ -64,7 +65,7 @@ namespace PortableJson.Xamarin
             {
                 result += Convert.ChangeType(element, (element as Enum).GetTypeCode()).ToString();
             }
-            else if (element is int || element is long || element is short)
+            else if (element is int || element is long || element is short || element is uint || element is ulong)
             {
                 result += element.ToString();
             }
@@ -764,6 +765,14 @@ namespace PortableJson.Xamarin
             else if (type == typeof(short))
             {
                 return short.Parse(data, NumberStyles.Any, serializationCulture);
+            }
+            else if (type == typeof(uint))
+            {
+                return uint.Parse(data, NumberStyles.Any, serializationCulture);
+            }
+            else if (type == typeof(ulong))
+            {
+                return ulong.Parse(data, NumberStyles.Any, serializationCulture);
             }
             else if (type == typeof(float))
             {
