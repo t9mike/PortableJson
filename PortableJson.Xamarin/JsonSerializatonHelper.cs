@@ -139,7 +139,7 @@ namespace PortableJson.Xamarin
                         .Where(p => p.CanRead && p.CanWrite);
                     foreach (var property in properties)
                     {
-                        result += "\"" + property.Name + "\":";
+                        result += "\"" + PropName(property) + "\":";
 
                         var value = property.GetValue(element);
                         result += Serialize(value) + ",";
@@ -168,6 +168,13 @@ namespace PortableJson.Xamarin
         public static T Deserialize<T>(string input)
         {
             return (T)(Deserialize(input, typeof(T)) ?? default(T));
+        }
+
+        private static string PropName(PropertyInfo pinfo)
+        {
+            var ainfo = pinfo.GetCustomAttribute<JsonPropertyAttribute>();
+            string pname = ainfo?.PropertyName;
+            return pname ?? pinfo.Name;
         }
 
         public static object Deserialize(string input, Type type)
@@ -348,7 +355,7 @@ namespace PortableJson.Xamarin
                                 var propertyValue = chunks[1];
 
                                 //now we can find the property on the object.
-                                var property = properties.SingleOrDefault(p => p.Name == propertyName);
+                                var property = properties.SingleOrDefault(p => PropName(p) == propertyName);
                                 if (property != null)
                                 {
 

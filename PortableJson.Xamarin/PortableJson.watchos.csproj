@@ -50,6 +50,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="JsonSerializatonHelper.cs" />
     <Compile Include="JsonUtil.cs" />
+    <Compile Include="JsonPropertyAttribute.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\WatchOS\Xamarin.WatchOS.CSharp.targets" />
 </Project>
